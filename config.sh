@@ -3,13 +3,12 @@
 # --- Configuration ---
 PROJECT_DIR="esp32_mqtt_simulator"
 DB_NAME="sensor_data.db"
+API_URL="http://127.0.0.1:5000/api/latest" # Flask API Endpoint
 
 # --- 1. System Setup and Dependency Installation (requires sudo) ---
 echo "## 1. Updating package lists and installing core dependencies (Mosquitto & Python tools)..."
-# Check if running on a Debian/Ubuntu system
 if [ -x "$(command -v apt-get)" ]; then
     sudo apt-get update
-    # Install Mosquitto broker and Python 3 pip
     sudo apt-get install -y mosquitto python3-pip
     echo "System dependencies installed."
 else
@@ -23,13 +22,11 @@ cd $PROJECT_DIR
 
 # --- 3. Python Environment and Library Installation ---
 echo "## 3. Installing required Python libraries..."
-pip3 install paho-mqtt flask sqlite3 # sqlite3 is built-in but included for clarity
+pip3 install paho-mqtt flask 
 echo "Python dependencies installed successfully."
 
 # --- 4. Database Setup ---
 echo "## 4. Creating SQLite database file: $DB_NAME"
-# The database will be fully setup by the data_storage.py script upon first run,
-# but we create the file here for structure.
 touch $DB_NAME
 echo "Database file created."
 
@@ -159,7 +156,7 @@ echo "data_storage.py created."
 # C. Flask API Script (Frontend Access)
 echo "## 7. Creating api.py (Flask Web API)..."
 cat << EOF > api.py
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template_string
 import sqlite3
 
 app = Flask(__name__)
@@ -169,6 +166,14 @@ def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
+
+# Optional: Add a root route for status/redirect
+@app.route('/', methods=['GET'])
+def index_status():
+    return jsonify({
+        "status": "API Operational", 
+        "endpoints": ["/api/latest", "/api/history/<count>"]
+    })
 
 @app.route('/api/latest', methods=['GET'])
 def get_latest_reading():
@@ -195,17 +200,116 @@ def get_history(count):
 
 if __name__ == '__main__':
     print("Flask API running on http://127.0.0.1:5000")
+    # Note: Flask runs on 0.0.0.0, making it accessible externally if firewall allows
     app.run(host='0.0.0.0', port=5000)
 EOF
 echo "api.py created."
 
-# --- 8. Final Instructions ---
+# D. Frontend HTML/JS Dashboard
+echo "## 8. Creating index.html (Dashboard Frontend)..."
+cat << EOF > index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 DHT11 Sensor Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f4f9; color: #333; margin: 20px; text-align: center; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #007bff; margin-bottom: 20px; }
+        .data-card { display: flex; justify-content: space-around; margin-top: 30px; }
+        .card { padding: 20px; border-radius: 8px; flex: 1; margin: 0 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        #temp-card { background-color: #ffe0e0; border-left: 5px solid #ff4d4d; }
+        #humid-card { background-color: #e0f7ff; border-left: 5px solid #4d8aff; }
+        .label { font-size: 1.1em; color: #555; }
+        .value { font-size: 3em; font-weight: bold; margin-top: 5px; }
+        #timestamp { margin-top: 20px; font-size: 0.9em; color: #777; }
+        .status-error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Live Sensor Data Dashboard</h1>
+        <p>Fetching data from Flask API endpoint: <code>/api/latest</code></p>
+        
+        <div class="data-card">
+            <div class="card" id="temp-card">
+                <div class="label">Temperature</div>
+                <div class="value"><span id="temperature">...</span> °C</div>
+            </div>
+            <div class="card" id="humid-card">
+                <div class="label">Humidity</div>
+                <div class="value"><span id="humidity">...</span> %</div>
+            </div>
+        </div>
+        
+        <div id="timestamp">Last Updated: <span id="last-updated">N/A</span></div>
+        <div id="error-message" class="status-error" style="display:none;"></div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = '$API_URL'; // Should be http://127.0.0.1:5000/api/latest
+        const REFRESH_INTERVAL = 5000; // Refresh every 5 seconds
+
+        const tempElement = document.getElementById('temperature');
+        const humidElement = document.getElementById('humidity');
+        const updatedElement = document.getElementById('last-updated');
+        const errorElement = document.getElementById('error-message');
+
+        /**
+         * Fetches the latest data from the Flask API and updates the dashboard.
+         */
+        async function fetchSensorData() {
+            try {
+                // Fetch data from the API endpoint
+                const response = await fetch(API_ENDPOINT);
+
+                if (!response.ok) {
+                    throw new Error(\`HTTP error! Status: \${response.status}\`);
+                }
+
+                const data = await response.json();
+                
+                // Check if the data is valid
+                if (data && data.timestamp) {
+                    tempElement.textContent = parseFloat(data.temperature).toFixed(2);
+                    humidElement.textContent = parseFloat(data.humidity).toFixed(2);
+                    updatedElement.textContent = data.timestamp;
+                    errorElement.style.display = 'none'; // Hide any previous error
+                } else {
+                    throw new Error("Received invalid or empty data.");
+                }
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                errorElement.textContent = \`ERROR: Failed to connect or receive data. Is the API running? (\${error.message})\`;
+                errorElement.style.display = 'block';
+                // Optional: Clear displayed values on critical error
+                tempElement.textContent = '---';
+                humidElement.textContent = '---';
+            }
+        }
+
+        // 1. Fetch data immediately upon loading
+        fetchSensorData();
+
+        // 2. Set up interval to fetch data periodically (real-time simulation)
+        setInterval(fetchSensorData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
+EOF
+echo "index.html created."
+
+
+# --- 9. Final Instructions (Updated) ---
 echo " "
-echo "========================================================"
+echo "=========================================================="
 echo "✅ SETUP COMPLETE! All files are in the '$PROJECT_DIR' directory."
-echo "========================================================"
+echo "=========================================================="
 echo " "
-echo "### To Run the Project (in three separate terminal windows):"
+echo "### To Launch the Live Dashboard (Requires four terminals):"
 echo " "
 echo "1. 🔌 Start the Mosquitto Broker (MQTT):"
 echo "   mosquitto"
@@ -217,7 +321,10 @@ echo "3. 🌡️ Start the Data Simulator (MQTT Publisher):"
 echo "   python3 simulator.py"
 echo " "
 echo "4. 🌐 Start the Web API (Frontend Data Source):"
-echo "   export FLASK_APP=api.py"
 echo "   python3 api.py"
 echo " "
-echo "You can test the API by visiting http://127.0.0.1:5000/api/latest in your browser."
+echo "### 🖥️ View the Live Dashboard"
+echo "Once all four steps above are running, open the following file in your web browser:"
+echo "   file://$(pwd)/index.html"
+echo " "
+echo "The dashboard will automatically update every 5 seconds."
