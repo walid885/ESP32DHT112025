@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 DHT11 Sensor Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f4f9; color: #333; margin: 20px; text-align: center; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #007bff; margin-bottom: 20px; }
+        .data-card { display: flex; justify-content: space-around; margin-top: 30px; }
+        .card { padding: 20px; border-radius: 8px; flex: 1; margin: 0 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        #temp-card { background-color: #ffe0e0; border-left: 5px solid #ff4d4d; }
+        #humid-card { background-color: #e0f7ff; border-left: 5px solid #4d8aff; }
+        .label { font-size: 1.1em; color: #555; }
+        .value { font-size: 3em; font-weight: bold; margin-top: 5px; }
+        #timestamp { margin-top: 20px; font-size: 0.9em; color: #777; }
+        .status-error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Live Sensor Data Dashboard</h1>
+        <p>Fetching data from Flask API endpoint: <code>/api/latest</code></p>
+        
+        <div class="data-card">
+            <div class="card" id="temp-card">
+                <div class="label">Temperature</div>
+                <div class="value"><span id="temperature">...</span> °C</div>
+            </div>
+            <div class="card" id="humid-card">
+                <div class="label">Humidity</div>
+                <div class="value"><span id="humidity">...</span> %</div>
+            </div>
+        </div>
+        
+        <div id="timestamp">Last Updated: <span id="last-updated">N/A</span></div>
+        <div id="error-message" class="status-error" style="display:none;"></div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'http://127.0.0.1:5000/api/latest'; // Should be http://127.0.0.1:5000/api/latest
+        const REFRESH_INTERVAL = 5000; // Refresh every 5 seconds
+
+        const tempElement = document.getElementById('temperature');
+        const humidElement = document.getElementById('humidity');
+        const updatedElement = document.getElementById('last-updated');
+        const errorElement = document.getElementById('error-message');
+
+        /**
+         * Fetches the latest data from the Flask API and updates the dashboard.
+         */
+        async function fetchSensorData() {
+            try {
+                // Fetch data from the API endpoint
+                const response = await fetch(API_ENDPOINT);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Check if the data is valid
+                if (data && data.timestamp) {
+                    tempElement.textContent = parseFloat(data.temperature).toFixed(2);
+                    humidElement.textContent = parseFloat(data.humidity).toFixed(2);
+                    updatedElement.textContent = data.timestamp;
+                    errorElement.style.display = 'none'; // Hide any previous error
+                } else {
+                    throw new Error("Received invalid or empty data.");
+                }
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                errorElement.textContent = `ERROR: Failed to connect or receive data. Is the API running? (${error.message})`;
+                errorElement.style.display = 'block';
+                // Optional: Clear displayed values on critical error
+                tempElement.textContent = '---';
+                humidElement.textContent = '---';
+            }
+        }
+
+        // 1. Fetch data immediately upon loading
+        fetchSensorData();
+
+        // 2. Set up interval to fetch data periodically (real-time simulation)
+        setInterval(fetchSensorData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
